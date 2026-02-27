@@ -3,8 +3,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { elementenApi, relatiesApi } from '@/lib/api';
-import { AFLEID_NAAR } from '@carecanvas/shared';
+import { AFLEID_NAAR } from '@/lib/relatie-types';
 import { AfleidPanel } from '@/components/AfleidPanel';
+
+const RELATIE_KLEUR: Record<string, string> = {
+  AFGELEID_VAN: 'bg-green-100 text-green-700',
+  IMPLEMENTEERT: 'bg-blue-100 text-blue-700',
+  VERWIJST_NAAR: 'bg-gray-100 text-gray-600',
+};
+
+const RELATIE_LABEL: Record<string, string> = {
+  AFGELEID_VAN: 'afgeleid van',
+  IMPLEMENTEERT: 'implementeert',
+  VERWIJST_NAAR: 'verwijst naar',
+};
 
 // ── Workflow definities ────────────────────────────────────────────────────────
 
@@ -152,7 +164,7 @@ const STEMMEN_TYPEN = ['VISIE', 'PRINCIPE'];
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-type TabType = 'bewerken' | 'discussie' | 'stemmen' | 'koppelen';
+type TabType = 'bewerken' | 'discussie' | 'stemmen' | 'relaties' | 'koppelen';
 
 export default function ElementDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -171,6 +183,9 @@ export default function ElementDetailPage() {
   const [stemBezig, setStemBezig]                   = useState(false);
   const [gebruiker, setGebruiker]                   = useState<any>(null);
   const [gekoppeldeElementen, setGekoppeldeElementen] = useState<Record<string, any>>({});
+  const [relaties, setRelaties] = useState<{ uitgaand: any[]; inkomend: any[] }>({ uitgaand: [], inkomend: [] });
+  const [relatieElementen, setRelatieElementen] = useState<Record<string, any>>({});
+  const [afleidPanelOpen, setAfleidPanelOpen] = useState(false);
 
   // Bewerkformulier state
   const [bewerkTitel, setBewerkTitel]               = useState('');
@@ -187,6 +202,27 @@ export default function ElementDetailPage() {
       }
     }
   }, []);
+
+  const laadRelaties = async () => {
+    try {
+      const res = await relatiesApi.vindRelaties(id);
+      const data = res.data as { uitgaand: any[]; inkomend: any[] };
+      setRelaties(data);
+      const alleIds = [
+        ...data.uitgaand.map((r) => r.naarElementId),
+        ...data.inkomend.map((r) => r.vanElementId),
+      ].filter(Boolean);
+      const uniekIds = [...new Set(alleIds)];
+      if (uniekIds.length > 0) {
+        const resultaten = await Promise.allSettled(uniekIds.map((rid) => elementenApi.vindOpId(rid)));
+        const map: Record<string, any> = {};
+        resultaten.forEach((r, i) => {
+          if (r.status === 'fulfilled') map[uniekIds[i]] = r.value.data;
+        });
+        setRelatieElementen(map);
+      }
+    } catch { /* niet fataal */ }
+  };
 
   const laadAlles = async () => {
     setBezig(true);
@@ -233,6 +269,7 @@ export default function ElementDetailPage() {
     } finally {
       setBezig(false);
     }
+    await laadRelaties();
   };
 
   useEffect(() => { laadAlles(); }, [id]);
@@ -332,6 +369,26 @@ export default function ElementDetailPage() {
     }
   };
 
+  const verwijderRelatie = async (relatieId: string) => {
+    if (!confirm('Relatie verwijderen?')) return;
+    try {
+      await relatiesApi.verwijderRelatie(id, relatieId);
+      await laadRelaties();
+    } catch {
+      alert('Fout bij verwijderen van relatie.');
+    }
+  };
+
+  const verwijderElement = async () => {
+    if (!confirm(`Element "${element?.titel}" permanent verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+    try {
+      await elementenApi.verwijder(id);
+      router.push('/elementen');
+    } catch (e: any) {
+      alert(e?.response?.data?.message ?? 'Fout bij verwijderen van element.');
+    }
+  };
+
   // ── Render ──
 
   if (bezig) return <div className="p-8 text-gray-400">Element laden...</div>;
@@ -339,24 +396,38 @@ export default function ElementDetailPage() {
 
   const toonStemmenTab = STEMMEN_TYPEN.includes(element.type);
   const isAfgerond = kenmerk?.fase === 'afgerond';
+  const kanAfleiden = (AFLEID_NAAR as any)[element.type]?.length > 0;
+  const totalRelaties = relaties.uitgaand.length + relaties.inkomend.length;
 
   // Beschikbare tabs
   const tabs: { key: TabType; label: string }[] = [
     ...(kanBewerken ? [{ key: 'bewerken' as TabType, label: 'Bewerken' }] : []),
     { key: 'discussie', label: `Discussie (${berichten.length})` },
     ...(toonStemmenTab ? [{ key: 'stemmen' as TabType, label: `Stemmen ${stemmen ? `(${stemmen.voor}v / ${stemmen.tegen}t)` : ''}` }] : []),
+    { key: 'relaties', label: `Relaties${totalRelaties > 0 ? ` (${totalRelaties})` : ''}` },
     { key: 'koppelen', label: 'Koppelingen' },
   ];
 
   return (
+    <>
     <div className="p-8 max-w-4xl mx-auto">
-      {/* Terug knop */}
-      <button
-        onClick={() => router.push('/elementen')}
-        className="text-sm text-gray-500 hover:text-gray-700 mb-6 flex items-center gap-1"
-      >
-        ← Terug naar elementen
-      </button>
+      {/* Terug knop + verwijder */}
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => router.push('/elementen')}
+          className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+        >
+          ← Terug naar elementen
+        </button>
+        {(isBeheerder || (isEigenaar && ['CONCEPT', 'SPECIFICATIE'].includes(element.status))) && (
+          <button
+            onClick={verwijderElement}
+            className="text-sm text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Verwijderen
+          </button>
+        )}
+      </div>
 
       {/* Consistentiesignalen */}
       {signalen.length > 0 && (
@@ -453,7 +524,7 @@ export default function ElementDetailPage() {
           </div>
 
           {/* Workflow actieknoppen */}
-          <div className="flex gap-2 mt-4 pt-4 border-t border-gray-50">
+          <div className="flex gap-2 mt-4 pt-4 border-t border-gray-50 flex-wrap">
             {vorigeStatus && !isAfgerond && (
               <button
                 onClick={() => wijzigStatus(vorigeStatus)}
@@ -461,6 +532,14 @@ export default function ElementDetailPage() {
                 className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 px-4 py-2 border border-gray-200 rounded-lg transition-colors"
               >
                 ← {vorigeStatus.replace(/_/g, ' ')}
+              </button>
+            )}
+            {kanAfleiden && (
+              <button
+                onClick={() => setAfleidPanelOpen(true)}
+                className="text-sm bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+              >
+                Afleiden naar →
               </button>
             )}
             {kanVolgendeZetten && volgendeStatus && (
@@ -687,6 +766,107 @@ export default function ElementDetailPage() {
             </div>
           )}
 
+          {/* ── Relaties tab ── */}
+          {actieveTab === 'relaties' && (
+            <div>
+              {/* Uitgaand: dit element is afgeleid van / verwijst naar andere elementen */}
+              {relaties.uitgaand.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Afgeleid van / verwijst naar
+                  </h3>
+                  <div className="space-y-2">
+                    {relaties.uitgaand.map((r) => {
+                      const el = relatieElementen[r.naarElementId];
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => router.push(`/elementen/${r.naarElementId}`)}
+                          className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg group hover:border-blue-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                        >
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${RELATIE_KLEUR[r.relatieType] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {RELATIE_LABEL[r.relatieType] ?? r.relatieType}
+                          </span>
+                          {el ? (
+                            <>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${TYPE_KLEUREN[el.type] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {el.type.replace(/_/g, ' ')}
+                              </span>
+                              <span className="text-sm font-medium text-gray-900 truncate flex-1">{el.titel}</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-gray-400 truncate flex-1">{r.naarElementId}</span>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); verwijderRelatie(r.id); }}
+                            className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 text-sm font-bold transition-opacity shrink-0"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Inkomend: andere elementen zijn afgeleid van dit element */}
+              {relaties.inkomend.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Heeft voortgebracht
+                  </h3>
+                  <div className="space-y-2">
+                    {relaties.inkomend.map((r) => {
+                      const el = relatieElementen[r.vanElementId];
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => router.push(`/elementen/${r.vanElementId}`)}
+                          className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg group hover:border-green-200 hover:bg-green-50 cursor-pointer transition-colors"
+                        >
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${RELATIE_KLEUR[r.relatieType] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {RELATIE_LABEL[r.relatieType] ?? r.relatieType}
+                          </span>
+                          {el ? (
+                            <>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${TYPE_KLEUREN[el.type] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {el.type.replace(/_/g, ' ')}
+                              </span>
+                              <span className="text-sm font-medium text-gray-900 truncate flex-1">{el.titel}</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-gray-400 truncate flex-1">{r.vanElementId}</span>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); verwijderRelatie(r.id); }}
+                            className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 text-sm font-bold transition-opacity shrink-0"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {totalRelaties === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-400 mb-2">Geen relaties.</p>
+                  {kanAfleiden && (
+                    <button
+                      onClick={() => setAfleidPanelOpen(true)}
+                      className="text-sm text-purple-600 hover:underline font-medium"
+                    >
+                      Gebruik &apos;Afleiden naar →&apos; om het eerste kind-element aan te maken.
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Koppelingen tab ── */}
           {actieveTab === 'koppelen' && (
             <div>
@@ -728,5 +908,19 @@ export default function ElementDetailPage() {
         </div>
       </div>
     </div>
+
+    {/* AfleidPanel overlay */}
+    {afleidPanelOpen && (
+      <AfleidPanel
+        bronElement={element}
+        onSluit={() => setAfleidPanelOpen(false)}
+        onVoltooid={async () => {
+          setAfleidPanelOpen(false);
+          await laadRelaties();
+          setActieveTab('relaties');
+        }}
+      />
+    )}
+    </>
   );
 }

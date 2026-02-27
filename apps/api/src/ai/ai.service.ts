@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 export interface SparringBerichtInput {
   gesprekGeschiedenis: { rol: string; inhoud: string }[];
@@ -29,18 +29,24 @@ interface LLMResultaat {
 }
 
 @Injectable()
-export class AiService {
+export class AiService implements OnModuleInit {
   private readonly logger = new Logger(AiService.name);
   private readonly anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   private readonly anthropicModel = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
   private readonly anthropicBeschikbaar =
     !!this.anthropicApiKey && this.anthropicApiKey !== 'sk-ant-PLACEHOLDER';
 
-  // Gemini fallback-providers (in volgorde van prioriteit)
-  private readonly geminiProviders: { naam: string; sleutel: string }[] = [
-    { naam: 'CareCanvasApi1', sleutel: process.env.GEMINI_API_KEY_1 ?? '' },
-    { naam: 'CareCanvasApi2', sleutel: process.env.GEMINI_API_KEY_2 ?? '' },
-  ].filter((g) => !!g.sleutel);
+  // Gemini fallback-providers — laadt automatisch GEMINI_API_KEY_1 t/m GEMINI_API_KEY_10
+  private readonly geminiProviders: { naam: string; sleutel: string }[] = (() => {
+    const providers: { naam: string; sleutel: string }[] = [];
+    for (let i = 1; i <= 10; i++) {
+      const sleutel = process.env[`GEMINI_API_KEY_${i}`] ?? '';
+      if (sleutel && sleutel !== 'undefined' && sleutel.length > 10) {
+        providers.push({ naam: `CareCanvasApi${i}`, sleutel });
+      }
+    }
+    return providers;
+  })();
 
   // Gemini modellen in volgorde van voorkeur (beste kwaliteit eerst)
   private readonly geminiModellen = [
@@ -50,6 +56,23 @@ export class AiService {
     'gemini-1.5-pro',
     'gemini-1.5-flash',
   ];
+
+  onModuleInit() {
+    this.logger.log(
+      `AI providers geladen — Anthropic: ${this.anthropicBeschikbaar ? `YES (${this.anthropicModel})` : 'NO'} | ` +
+      `Gemini keys: ${this.geminiProviders.length} (${this.geminiProviders.map((p) => p.naam).join(', ') || 'geen'}) | ` +
+      `Fallback: mock-modus altijd beschikbaar`,
+    );
+  }
+
+  /**
+   * Retourneert true als de quota permanent 0 is voor deze key (betaald project zonder gratis tier).
+   * In dat geval heeft geen enkel model op deze key een kans — direct naar volgende key.
+   * Tijdelijke rate-limiting (429 zonder "limit: 0") wordt per model geprobeerd.
+   */
+  private isKwotaUitgeput(err: Error): boolean {
+    return err.message.includes('limit: 0');
+  }
 
   async sparringPartner(input: SparringBerichtInput): Promise<SparringAntwoord> {
     return this.sparringMetFallback(input);
@@ -131,6 +154,88 @@ Geef ALLEEN dit JSON-object terug:
       };
     } catch {
       return this.mockAfleidElementen(bronElement, doelType, bestaandeElementen);
+    }
+  }
+
+  async aanbevelAfleiding(
+    bronElement: any,
+    mogelijkeAfleiding: { type: string; relatie: string }[],
+  ): Promise<{
+    aanbevelingen: {
+      doelType: string;
+      relatieType: string;
+      prioriteit: 'HOOG' | 'MIDDEL' | 'LAAG';
+      redenering: string;
+      voorgesteldeTitel: string;
+      voorgesteldeInhoud: string;
+    }[];
+  }> {
+    const formatInstructies: Record<string, string> = {
+      VISIE: 'Wij geloven dat... [ambitie]. Onze visie is...',
+      PRINCIPE: 'Principe: [stelling]. Rationale: [waarom]. Implicaties: [praktijk].',
+      EPIC: 'Als [doelgroep] willen wij [capability] zodat [businesswaarde].',
+      MODULE: 'Module [naam]: [verantwoordelijkheid en afbakening].',
+      FUNCTIONALITEIT: 'Functionaliteit [naam]: [wat het doet, voor wie, waarom].',
+      FUNCTIONEEL_ONTWERP: 'Functioneel ontwerp: [beschrijving van gedrag, schermen, flows].',
+      TECHNISCH_ONTWERP: 'Technisch ontwerp: [architectuur, patronen, technologiekeuzes].',
+      USER_STORY: 'Als [rol] wil ik [actie] zodat [doel].\n\nAcceptatiecriteria:\n- [...]\n- [...]',
+      API_CONTRACT: 'Endpoint: [METHODE] /pad\nRequest body: {...}\nResponse 200: {...}',
+      DATAMODEL: 'Entiteit: [naam]\nVelden:\n- [naam] ([type]): [beschrijving]',
+    };
+
+    const mogelijkeTypen = mogelijkeAfleiding
+      .map((m) => `- ${m.type} (relatieType: ${m.relatie})`)
+      .join('\n');
+
+    const formatLijst = mogelijkeAfleiding
+      .map((m) => `${m.type}: "${formatInstructies[m.type] ?? 'Beschrijf het element zo concreet mogelijk.'}"`)
+      .join('\n');
+
+    const systeemPrompt = `Je bent een expert in zorginnovatie en software-architectuur bij CareCanvas. Je analyseert bestaande elementen en bepaalt welke afgeleide elementen het meest waardevol zijn om nu te creëren.
+Geef altijd valide JSON terug zonder markdown code-blokken.`;
+
+    const gebruikerPrompt = `Analyseer het onderstaande bron-element grondig en bepaal welke afgeleide elementen het meest zinvol en urgent zijn om aan te maken.
+
+Bron-element:
+Type: ${bronElement.type}
+Titel: ${bronElement.titel}
+Inhoud: ${bronElement.inhoud ?? '(geen inhoud)'}
+Toelichting: ${bronElement.toelichting ?? '(geen toelichting)'}
+
+Mogelijke afleiding-types (kies hieruit):
+${mogelijkeTypen}
+
+Opdracht:
+1. Analyseer het bron-element inhoudelijk — wat beschrijft het, wat mist er nog?
+2. Bepaal welke types het meest logisch en urgent zijn om nu te creëren (prioriteit HOOG = direct nodig, LAAG = optioneel later)
+3. Geef maximaal 4 aanbevelingen, van meest naar minst prioriteit
+4. Per aanbeveling: schrijf een concrete redenering waarom dit type nu het meest waardevol is
+5. Genereer voor elke aanbeveling een volledig ingevulde initiële inhoud — gebruik ALTIJD de werkelijke inhoud van het bron-element als basis. Vervang ALLE [placeholders] door concrete tekst afgeleid van het bron-element. Geen generieke templates of lege haakjes.
+
+Format-instructies per type (gebruik als structuur, vul inhoudelijk in vanuit het bron-element):
+${formatLijst}
+
+Geef ALLEEN dit JSON-object terug:
+{
+  "aanbevelingen": [
+    {
+      "doelType": "EPIC",
+      "relatieType": "AFGELEID_VAN",
+      "prioriteit": "HOOG",
+      "redenering": "<concrete redenering waarom dit type nu de beste keuze is>",
+      "voorgesteldeTitel": "<een prikkelende, specifieke titel gebaseerd op de bron-inhoud>",
+      "voorgesteldeInhoud": "<volledig ingevuld met concrete inhoud afgeleid van het bron-element — geen placeholders>"
+    }
+  ]
+}`;
+
+    try {
+      const resultaat = await this.llmAnroep(systeemPrompt, gebruikerPrompt);
+      const json = resultaat.tekst.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(json);
+      return { aanbevelingen: parsed.aanbevelingen ?? [] };
+    } catch {
+      return this.mockAanbevelAfleiding(bronElement, mogelijkeAfleiding);
     }
   }
 
@@ -415,6 +520,68 @@ Vergelijk elementen met vastgestelde principes en signaleer inconsistenties. Gee
     };
   }
 
+  private mockAanbevelAfleiding(
+    bronElement: any,
+    mogelijkeAfleiding: { type: string; relatie: string }[],
+  ) {
+    const prioriteiten: ('HOOG' | 'MIDDEL' | 'LAAG')[] = ['HOOG', 'MIDDEL', 'LAAG'];
+    const basisTitel = bronElement.titel ?? 'dit element';
+    const bronInhoud = (bronElement.inhoud ?? '').trim();
+    const bronType = (bronElement.type ?? '').toLowerCase().replace(/_/g, ' ');
+    const aanbevelingen = mogelijkeAfleiding.slice(0, 3).map((m, i) => ({
+      doelType: m.type,
+      relatieType: m.relatie,
+      prioriteit: prioriteiten[i] ?? 'LAAG',
+      redenering: `Op basis van "${basisTitel}" is een ${m.type.replace(/_/g, ' ')} de logische volgende stap. Dit concretiseert de inhoud van de ${bronType} naar een uitvoerbaar niveau voor het team.`,
+      voorgesteldeTitel: `${m.type.replace(/_/g, ' ')} — ${basisTitel}`,
+      voorgesteldeInhoud: this.genereerMockAfgeleidInhoud(m.type, basisTitel, bronInhoud, bronElement.type),
+    }));
+    return { aanbevelingen };
+  }
+
+  private genereerMockAfgeleidInhoud(
+    doelType: string,
+    bronTitel: string,
+    bronInhoud: string,
+    bronType: string,
+  ): string {
+    const kort = bronInhoud.length > 0 ? bronInhoud.substring(0, 250) : bronTitel;
+    const slug = bronTitel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const entiteitNaam = bronTitel.replace(/[^a-zA-Z0-9 ]/g, '').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+
+    switch (doelType) {
+      case 'PRINCIPE':
+        return `Principe: ${bronTitel}\nRationale: ${kort.substring(0, 150)}\nImplicaties: Dit principe betekent in de praktijk dat alle ontwerpen en implementaties consistent moeten zijn met de doelstelling van "${bronTitel}".`;
+
+      case 'EPIC':
+        return `Als zorgprofessional willen wij ${bronTitel.toLowerCase()} kunnen realiseren zodat de zorgkwaliteit en efficiëntie verbeteren.\nScope: Omvat alle functionaliteiten die direct voortvloeien uit: ${kort.substring(0, 120)}\nNiet in scope: Infrastructurele en beheertaken die buiten de kernfunctionaliteit vallen.`;
+
+      case 'MODULE':
+        return `Module ${bronTitel}: Verantwoordelijk voor de kernfunctionaliteit rondom "${bronTitel}".\nVerantwoordelijkheden:\n- Verwerken en opslaan van gegevens gerelateerd aan ${bronTitel.toLowerCase()}\n- Aanbieden van data aan downstream modules\n- Afhandelen van uitzonderingsscenario's\nAfhankelijkheden: Authenticatiemodule, Auditlog-module`;
+
+      case 'FUNCTIONALITEIT':
+        return `Functionaliteit: ${bronTitel}\nWat het doet: ${kort.substring(0, 200)}\nVoor wie: Zorgprofessionals en betrokken eindgebruikers\nWaarom: Directe uitwerking van de bovenliggende ${bronType.replace(/_/g, ' ').toLowerCase()}\nRandvoorwaarden: AVG-conform, NEN 7510 beveiligd`;
+
+      case 'FUNCTIONEEL_ONTWERP':
+        return `Doel: Functionele uitwerking van "${bronTitel}"\nGebruikersgroepen: Zorgverleners, patiënten, beheerders\nHoofdprocessen:\n1. Initiëren van ${bronTitel.toLowerCase()}\n2. Verwerken en valideren van invoer\n3. Bevestigen en vastleggen van resultaat\nSchermflow: Overzichtsscherm → Detailscherm → Actie → Bevestiging\nFoutafhandeling: Validatiemelding bij ontbrekende verplichte velden`;
+
+      case 'TECHNISCH_ONTWERP':
+        return `Technisch ontwerp: ${bronTitel}\nArchitectuur: REST API (NestJS) + React/Next.js frontend\nComponenten:\n- ${entiteitNaam}Service: Businesslogica en datalaag\n- ${entiteitNaam}Controller: REST-endpoints conform ${slug}\n- ${entiteitNaam}Repository: TypeORM-repository voor PostgreSQL\nInterfaces: FHIR R4-conform, JSON:API response-formaat\nTechnologiekeuzes: NestJS, TypeScript, PostgreSQL, class-validator`;
+
+      case 'USER_STORY':
+        return `Als zorgprofessional wil ik ${bronTitel.toLowerCase()} zodat ik efficiënter en veiliger kan werken.\n\nAcceptatiecriteria:\n- De functionaliteit is beschikbaar via een beveiligde interface (JWT)\n- Invoer wordt gevalideerd vóór opslag\n- Alle wijzigingen worden gelogd conform NEN 7513\n- De gebruiker ontvangt duidelijke foutmeldingen bij onjuiste invoer\n- Toegankelijk op desktop en tablet`;
+
+      case 'API_CONTRACT':
+        return `Endpoint: GET /api/v1/${slug}\nBeschrijving: Ophalen van ${bronTitel.toLowerCase()}\nRequest parameters: { id?: string, status?: string }\nResponse 200: { data: { id: string, titel: string, status: string, aangemaaktOp: string }, meta: { totaal: number } }\nFoutcodes:\n- 401: Niet geauthenticeerd\n- 403: Geen toegang\n- 404: Niet gevonden\nFHIR resource: Bundle`;
+
+      case 'DATAMODEL':
+        return `Entiteit: ${entiteitNaam}\nVelden:\n- id (UUID, verplicht): Unieke identificatie\n- titel (string, verplicht, max 255): Naam van ${bronTitel.toLowerCase()}\n- inhoud (text, optioneel): Uitgebreide beschrijving\n- status (enum, verplicht): Huidige toestand in de workflow\n- eigenaarId (UUID, verplicht): FK → users.id\n- aangemaaktOp (timestamptz, verplicht): Aanmaakmoment\n- bijgewerktOp (timestamptz, verplicht): Laatste wijziging\nRelaties:\n- N:1 met User (eigenaarId)\n- 1:N met ${entiteitNaam}Relatie`;
+
+      default:
+        return `${doelType.replace(/_/g, ' ')} afgeleid van "${bronTitel}":\n\n${kort}`;
+    }
+  }
+
   private mockConsistentieCheck(nieuw: string, bestaande: string[]) {
     return {
       overlappen:
@@ -507,7 +674,11 @@ Antwoord altijd in het Nederlands. Wees empathisch, nieuwsgierig en niet-technis
             this.logger.log(`Sparring: Gemini ${naam}/${model} succesvol`);
             break;
           } catch (err: any) {
-            this.logger.warn(`Gemini ${naam}/${model}: ${err.message}`);
+            this.logger.warn(`Gemini ${naam}/${model}: ${err.message.substring(0, 200)}`);
+            if (this.isKwotaUitgeput(err)) {
+              this.logger.warn(`Gemini ${naam}: project-kwota uitgeput — sla resterende modellen over`);
+              break;
+            }
           }
           if (chatTekst) break;
         }
@@ -567,6 +738,7 @@ Antwoord altijd in het Nederlands. Wees empathisch, nieuwsgierig en niet-technis
 
     // 2. Gemini providers
     for (const { naam, sleutel } of this.geminiProviders) {
+      let kwotaUitgeput = false;
       for (const model of this.geminiModellen) {
         try {
           const tekst = await this.geminiAnroep(
@@ -576,9 +748,15 @@ Antwoord altijd in het Nederlands. Wees empathisch, nieuwsgierig en niet-technis
           this.logger.log(`llmAnroep: Gemini ${naam}/${model} succesvol`);
           return { tekst, provider: `gemini (${naam})`, model };
         } catch (err: any) {
-          this.logger.warn(`Gemini ${naam}/${model}: ${err.message}`);
+          this.logger.warn(`Gemini ${naam}/${model}: ${err.message.substring(0, 200)}`);
+          if (this.isKwotaUitgeput(err)) {
+            this.logger.warn(`Gemini ${naam}: project-kwota uitgeput — sla resterende modellen over, probeer volgende sleutel`);
+            kwotaUitgeput = true;
+            break;
+          }
         }
       }
+      if (kwotaUitgeput) continue; // direct naar volgende key
     }
 
     throw new Error('Alle LLM-providers zijn niet beschikbaar');

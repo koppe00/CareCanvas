@@ -1,6 +1,6 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsArray, IsOptional } from 'class-validator';
+import { IsString, IsArray, IsOptional, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AiService } from './ai.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -48,6 +48,16 @@ class DocumentNaarElementenDto {
   document: string;
 }
 
+class AanbevelDto {
+  @ApiProperty()
+  @IsObject()
+  bronElement: Record<string, any>;
+
+  @ApiProperty()
+  @IsArray()
+  mogelijkeAfleiding: { type: string; relatie: string }[];
+}
+
 @ApiTags('ai')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -83,6 +93,12 @@ export class AiController {
   @ApiOperation({ summary: 'Extraheer meerdere element-concepten uit een document of FO' })
   documentNaarElementen(@Body() dto: DocumentNaarElementenDto) {
     return this.aiService.extraheerElementenUitDocument(dto.document);
+  }
+
+  @Post('aanbevelen')
+  @ApiOperation({ summary: 'AI analyseert een element en beveelt prioritaire afleiding-typen aan' })
+  aanbevelen(@Body() body: AanbevelDto) {
+    return this.aiService.aanbevelAfleiding(body.bronElement, body.mogelijkeAfleiding ?? []);
   }
 
   @Post('afleiden')

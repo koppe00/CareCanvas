@@ -51,6 +51,27 @@ export default function ElementenPage() {
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [signaalTellers, setSignaalTellers] = useState<Record<string, number>>({});
+  const [gebruiker, setGebruiker] = useState<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const opgeslagen = localStorage.getItem('carecanvas_user');
+      if (opgeslagen) {
+        try { setGebruiker(JSON.parse(opgeslagen)); } catch {}
+      }
+    }
+  }, []);
+
+  const verwijderElement = async (e: React.MouseEvent, el: any) => {
+    e.stopPropagation();
+    if (!confirm(`Element "${el.titel}" verwijderen?`)) return;
+    try {
+      await elementenApi.verwijder(el.id);
+      setElementen((prev) => prev.filter((item) => item.id !== el.id));
+    } catch (err: any) {
+      alert(err?.response?.data?.message ?? 'Fout bij verwijderen.');
+    }
+  };
 
   const laadElementen = async () => {
     setBezig(true);
@@ -183,11 +204,21 @@ export default function ElementenPage() {
                 <span className="text-xs text-gray-400">
                   v{el.versie} · {new Date(el.aangemaaktOp).toLocaleDateString('nl-NL')}
                 </span>
-                {(signaalTellers[el.id] ?? 0) > 0 && (
-                  <span className="text-xs bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded-full">
-                    {signaalTellers[el.id]} signaal{signaalTellers[el.id] !== 1 ? 'en' : ''}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {(signaalTellers[el.id] ?? 0) > 0 && (
+                    <span className="text-xs bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded-full">
+                      {signaalTellers[el.id]} signaal{signaalTellers[el.id] !== 1 ? 'en' : ''}
+                    </span>
+                  )}
+                  {(gebruiker?.rollen?.includes('BEHEERDER') || (el.eigenaarId === gebruiker?.id && el.status === 'CONCEPT')) && (
+                    <button
+                      onClick={(e) => verwijderElement(e, el)}
+                      className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+                    >
+                      Verwijder
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

@@ -129,6 +129,24 @@ export class ElementenService {
     return opgeslagen;
   }
 
+  async verwijderElement(id: string, gebruiker: { id: string; rollen: string[] }): Promise<void> {
+    const element = await this.vindOpId(id);
+    const isBeheerder = gebruiker.rollen.includes('BEHEERDER');
+    if (element.eigenaarId !== gebruiker.id && !isBeheerder) {
+      throw new ForbiddenException('Alleen de eigenaar of een beheerder kan dit element verwijderen');
+    }
+    const VERWIJDERBAAR = ['CONCEPT', 'SPECIFICATIE'];
+    if (!VERWIJDERBAAR.includes(element.status) && !isBeheerder) {
+      throw new ForbiddenException(
+        `Element in status '${element.status}' kan niet verwijderd worden. Zet het terug naar CONCEPT of vraag een beheerder.`,
+      );
+    }
+    // Verwijder gekoppelde relaties (geen cascade op entity ingesteld)
+    await this.relatieRepo.delete({ vanElementId: id });
+    await this.relatieRepo.delete({ naarElementId: id });
+    await this.elementRepo.delete(id);
+  }
+
   async bijwerken(
     id: string,
     dto: WijzigElementDto,

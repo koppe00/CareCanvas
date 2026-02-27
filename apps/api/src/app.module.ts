@@ -20,6 +20,7 @@ import { ElementEntity } from './elementen/entities/element.entity';
 import { DiscussieBerichtEntity } from './elementen/entities/discussie-bericht.entity';
 import { StemEntity } from './elementen/entities/stem.entity';
 import { SignaalEntity } from './elementen/entities/signaal.entity';
+import { ElementRelatieEntity } from './elementen/entities/element-relatie.entity';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { SignaalEntity } from './elementen/entities/signaal.entity';
         DiscussieBerichtEntity,
         StemEntity,
         SignaalEntity,
+        ElementRelatieEntity,
       ],
       synchronize: process.env.NODE_ENV !== 'production',
       logging: process.env.NODE_ENV === 'development',

@@ -9,12 +9,6 @@ const rollen = [
   { naam: 'De Beheerder', kleur: 'bg-gray-100 text-gray-800', beschrijving: 'Bewaakt kwaliteit en platformstandaarden.' },
 ];
 
-const principes = [
-  { nummer: 'I', naam: 'Menselijke Maat', beschrijving: 'Technologie dient altijd de zorgverlener en patiënt, niet andersom.' },
-  { nummer: 'II', naam: 'Interoperabiliteit by Design', beschrijving: 'FHIR R4/R5 en ZIB\'s zijn geen optie, maar een basisvereiste.' },
-  { nummer: 'III', naam: 'Radicale Transparantie', beschrijving: 'Geen black-box beslissingen. Elke AI-redenering is inzichtelijk.' },
-  { nummer: 'IV', naam: 'Inclusieve Eigenaarschap', beschrijving: 'Patiënten zijn medeontwerpende stemmen, geen testsubjecten.' },
-];
 
 export default function HomePage() {
   return (
@@ -61,8 +55,86 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Rollen */}
+      {/* Elementen-keten */}
       <section className="py-20 px-6">
+        <div className="max-w-7xl mx-auto">
+          <h2 className="text-3xl font-bold text-gray-900 mb-3 text-center">
+            Van visie tot datamodel
+          </h2>
+          <p className="text-gray-500 text-center mb-12 max-w-2xl mx-auto">
+            CareCanvas werkt met tien samenhangende element-typen. Elk element bouwt voort op het vorige —
+            van een hoog-over Visie tot een concreet Datamodel dat direct implementeerbaar is.
+          </p>
+          <div className="flex flex-wrap justify-center items-center gap-2 mb-16">
+            {[
+              { label: 'Visie', kleur: 'bg-purple-100 text-purple-700' },
+              { label: '→', kleur: '' },
+              { label: 'Principe', kleur: 'bg-indigo-100 text-indigo-700' },
+              { label: '→', kleur: '' },
+              { label: 'Epic', kleur: 'bg-blue-100 text-blue-700' },
+              { label: '→', kleur: '' },
+              { label: 'Module', kleur: 'bg-cyan-100 text-cyan-700' },
+              { label: '→', kleur: '' },
+              { label: 'Functionaliteit', kleur: 'bg-teal-100 text-teal-700' },
+              { label: '→', kleur: '' },
+              { label: 'Ontwerp', kleur: 'bg-green-100 text-green-700' },
+              { label: '→', kleur: '' },
+              { label: 'User Story', kleur: 'bg-yellow-100 text-yellow-700' },
+              { label: '→', kleur: '' },
+              { label: 'API Contract', kleur: 'bg-orange-100 text-orange-700' },
+              { label: '→', kleur: '' },
+              { label: 'Datamodel', kleur: 'bg-red-100 text-red-700' },
+            ].map((item, i) =>
+              item.kleur ? (
+                <span key={i} className={`text-xs font-semibold px-3 py-1.5 rounded-full ${item.kleur}`}>
+                  {item.label}
+                </span>
+              ) : (
+                <span key={i} className="text-gray-300 font-light">{item.label}</span>
+              )
+            )}
+          </div>
+
+          <h2 className="text-3xl font-bold text-gray-900 mb-12 text-center">
+            Hoe het werkt
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            {[
+              {
+                stap: '1',
+                naam: 'Sparring-Partner',
+                omschrijving: 'Verken uw idee via een socratisch AI-gesprek. De Sparring-Partner stelt gerichte vragen totdat uw concept helder genoeg is om op te slaan als element.',
+              },
+              {
+                stap: '2',
+                naam: 'Elementen aanmaken',
+                omschrijving: 'Sla uw ideeën op als getypeerde elementen — van abstracte Visie tot concrete User Story. Elk element doorloopt een eigen workflow van Concept naar Vastgesteld.',
+              },
+              {
+                stap: '3',
+                naam: 'AI-gestuurde afleiding',
+                omschrijving: 'Klik "Afleiden naar →" op elk element. De AI analyseert de inhoud en beveelt aan welk volgend element het meest zinvol is om nu aan te maken — inclusief een concept-draft.',
+              },
+              {
+                stap: '4',
+                naam: 'Systeem Canvas',
+                omschrijving: 'Alle goedgekeurde elementen zijn hiërarchisch verbonden. Het Canvas toont de volledige blauwdruk als een klikbare boom — van Visie helemaal door naar Datamodel.',
+              },
+            ].map((f) => (
+              <div key={f.stap} className="text-center">
+                <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center text-lg font-bold mx-auto mb-4">
+                  {f.stap}
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">{f.naam}</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">{f.omschrijving}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Rollen */}
+      <section className="py-20 px-6 bg-gray-50">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold text-gray-900 mb-3 text-center">
             Elke rol telt
@@ -73,61 +145,11 @@ export default function HomePage() {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {rollen.map((rol) => (
-              <div key={rol.naam} className="border border-gray-100 rounded-xl p-6 hover:shadow-md transition-shadow">
+              <div key={rol.naam} className="border border-gray-100 bg-white rounded-xl p-6 hover:shadow-md transition-shadow">
                 <span className={`inline-block text-xs font-semibold px-3 py-1 rounded-full mb-3 ${rol.kleur}`}>
                   {rol.naam}
                 </span>
                 <p className="text-gray-600 text-sm leading-relaxed">{rol.beschrijving}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Grondwet */}
-      <section className="bg-gray-50 py-20 px-6">
-        <div className="max-w-7xl mx-auto">
-          <h2 className="text-3xl font-bold text-gray-900 mb-3 text-center">
-            De Grondwet
-          </h2>
-          <p className="text-gray-500 text-center mb-12">
-            Vier ononderhandelbare principes waaraan elk project wordt getoetst.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {principes.map((p) => (
-              <div key={p.nummer} className="bg-white rounded-xl p-6 border border-gray-100">
-                <div className="flex items-start gap-4">
-                  <span className="text-3xl font-bold text-blue-200 font-serif">{p.nummer}</span>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-1">{p.naam}</h3>
-                    <p className="text-gray-500 text-sm">{p.beschrijving}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Functies */}
-      <section className="py-20 px-6">
-        <div className="max-w-7xl mx-auto">
-          <h2 className="text-3xl font-bold text-gray-900 mb-12 text-center">
-            Van idee naar blauwdruk
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            {[
-              { stap: '1', naam: 'Sparring-Partner', omschrijving: 'AI-gesprekspartner die uw zorgvisie scherpt via socratische vragen.' },
-              { stap: '2', naam: 'Spec-Generator', omschrijving: 'Automatische User Stories, datamodellen en FHIR API-contracten.' },
-              { stap: '3', naam: 'Compliance-Scanner', omschrijving: 'Toetsing aan AVG, NEN 7510 en WGBO vóór u bouwt.' },
-              { stap: '4', naam: 'Blueprint-Export', omschrijving: 'Complete exportpakketten die direct implementeerbaar zijn.' },
-            ].map((f) => (
-              <div key={f.stap} className="text-center">
-                <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center text-lg font-bold mx-auto mb-4">
-                  {f.stap}
-                </div>
-                <h3 className="font-semibold text-gray-900 mb-2">{f.naam}</h3>
-                <p className="text-gray-500 text-sm">{f.omschrijving}</p>
               </div>
             ))}
           </div>
@@ -141,7 +163,7 @@ export default function HomePage() {
             Laten we het zorgsysteem van morgen bouwen
           </h2>
           <p className="text-blue-200 mb-8">
-            Maak vandaag een gratis account aan en begin uw eerste CareCanvas project.
+            Maak vandaag een gratis account aan en zet uw eerste element op het canvas.
           </p>
           <Link
             href="/auth/register"
@@ -155,7 +177,7 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-8 px-6">
         <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
-          <p className="text-sm">© 2025 CareCanvas — Van Verbeelding naar Zorgkracht</p>
+          <p className="text-sm">© 2026 CareCanvas — Van Verbeelding naar Zorgkracht</p>
           <p className="text-xs">FHIR R4/R5 · ZIB 2020 · AVG-conform · NEN 7510</p>
         </div>
       </footer>

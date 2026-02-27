@@ -4,6 +4,8 @@ import {
   Post,
   Patch,
   Delete,
+  HttpCode,
+  HttpStatus,
   Body,
   Param,
   Query,
@@ -68,6 +70,13 @@ export class ElementenController {
   @ApiOperation({ summary: 'Werk een element bij' })
   bijwerken(@Param('id') id: string, @Body() dto: WijzigElementDto, @CurrentUser() user: any) {
     return this.elementenService.bijwerken(id, dto, user.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Verwijder een element (eigenaar of beheerder, CONCEPT/SPECIFICATIE status)' })
+  verwijderElement(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.elementenService.verwijderElement(id, { id: user.id, rollen: user.rollen ?? [] });
   }
 
   @Patch(':id/status')

@@ -52,6 +52,8 @@ export const aiApi = {
   documentNaarElementen: (document: string) => apiClient.post('/ai/document-naar-elementen', { document }),
   afleiden: (data: { bronElement: any; doelType: string; bestaandeElementen: any[] }) =>
     apiClient.post('/ai/afleiden', data),
+  aanbevelen: (data: { bronElement: any; mogelijkeAfleiding: { type: string; relatie: string }[] }) =>
+    apiClient.post('/ai/aanbevelen', data),
 };
 
 export const elementenApi = {
@@ -72,6 +74,7 @@ export const elementenApi = {
   vindSignalen: (id: string) => apiClient.get(`/elementen/${id}/signalen`),
   markeerOpgelost: (id: string, signaalId: string) =>
     apiClient.patch(`/elementen/${id}/signalen/${signaalId}/opgelost`, {}),
+  verwijder: (id: string) => apiClient.delete(`/elementen/${id}`),
 };
 
 export const relatiesApi = {
