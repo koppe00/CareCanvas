@@ -1,0 +1,160 @@
+version: '3.9'
+
+services:
+  # ─── Relationele database ───────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: carecanvas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-carecanvas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carecanvas_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-carecanvas}
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-carecanvas}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Graph database ──────────────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    container_name: carecanvas-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/carecanvas_secret}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: 'apoc.*'
+    ports:
+      - '7474:7474' # Browser
+      - '7687:7687' # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:7474']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Zoekindex ───────────────────────────────────────────────────────────────
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: carecanvas-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+    ports:
+      - '9200:9200'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9200/_cluster/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Message streaming (audit log) ──────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: carecanvas-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - '2181:2181'
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: carecanvas-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    ports:
+      - '9092:9092'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  # ─── S3-compatibele objectopslag ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: carecanvas-minio
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-carecanvas}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-carecanvas_secret}
+    ports:
+      - '9000:9000' # API
+      - '9001:9001' # Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Cache & queue ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: carecanvas-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-carecanvas_secret}
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--pass', '${REDIS_PASSWORD:-carecanvas_secret}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── FHIR Server ──────────────────────────────────────────────────────────────
+  fhir:
+    image: hapiproject/hapi:latest
+    container_name: carecanvas-fhir
+    restart: unless-stopped
+    environment:
+      hapi.fhir.fhir_version: R4
+      hapi.fhir.server_address: http://localhost:8080/fhir
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+  elasticsearch_data:
+  zookeeper_data:
+  zookeeper_logs:
+  kafka_data:
+  minio_data:
+  redis_data:
+
+networks:
+  default:
+    name: carecanvas-network
